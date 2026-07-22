@@ -1,0 +1,54 @@
+{% set name = "REVEAL" %}
+{% set version = "1.0.0" %}
+{% set sha256 = "PLACEHOLDER_RUN_sha256sum_ON_THE_RELEASE_TARBALL" %}
+
+package:
+  name: "{{ name|lower }}"
+  version: "{{ version }}"
+
+source:
+  url: https://github.com/RobertKofler/teplotter/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: {{ sha256 }}
+
+build:
+  number: 0
+  noarch: generic
+  run_exports:
+    - {{ pin_subpackage("REVEAL", max_pin="x") }}
+
+requirements:
+  run:
+    - python >=3.7
+    - pysam
+    - numpy
+    - pandas
+    - r-base >=4.0
+    - r-tidyverse >=2.0.0
+
+test:
+  requires:
+    - pytest
+    - numpy
+  source_files:
+    - tests/
+  commands:
+    - REVEAL --help
+    - PYTHONPATH="$PREFIX/lib/reveal" pytest tests/ -v
+
+about:
+  home: https://github.com/RobertKofler/teplotter
+  dev_url: https://github.com/RobertKofler/teplotter
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: "Toolkit for BAM-to-sequence-overview conversion, coverage analysis, and TE visualization"
+  description: |
+    REVEAL converts BAM/SAM alignments to sequence overview (SO) format and
+    extracts per-position coverage, SNPs, and indels. It supports coverage
+    normalization using single-copy genes, copy number estimation, and
+    generates R/ggplot2-ready plotable output for visualization.
+
+extra:
+  recipe-maintainers:
+    - RobertKofler
+    - SarahSaadain
