@@ -462,7 +462,7 @@ Robert Kofler, Sarah Saadain
 
 ## License
 
-TODO
+MIT License (MIT)
 
 ## Citation
 

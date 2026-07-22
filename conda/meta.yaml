@@ -7,14 +7,14 @@ package:
   version: "{{ version }}"
 
 source:
-  url: https://github.com/RobertKofler/teplotter/archive/refs/tags/v{{ version }}.tar.gz
+  url: https://github.com/SarahSaadain/REVEAL/archive/refs/tags/v{{ version }}.tar.gz
   sha256: {{ sha256 }}
 
 build:
   number: 0
   noarch: generic
   run_exports:
-    - {{ pin_subpackage("REVEAL", max_pin="x") }}
+    - {{ pin_subpackage("reveal", max_pin="x") }}
 
 requirements:
   run:
@@ -36,8 +36,8 @@ test:
     - PYTHONPATH="$PREFIX/lib/reveal" pytest tests/ -v
 
 about:
-  home: https://github.com/RobertKofler/teplotter
-  dev_url: https://github.com/RobertKofler/teplotter
+  home: https://github.com/SarahSaadain/REVEAL
+  dev_url: https://github.com/SarahSaadain/REVEAL
   license: MIT
   license_family: MIT
   license_file: LICENSE
