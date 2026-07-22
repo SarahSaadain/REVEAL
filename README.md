@@ -6,6 +6,8 @@ A Python toolkit for converting BAM/SAM alignment files to sequence overview (SO
 
 REVEAL processes short-read alignments to extract coverage, SNP, and indel information for each reference sequence. It is particularly useful for analyzing genomic regions of interest (e.g. TEs, genes, symbionts) and their coverage and variation.
 
+If you want to use REVEAL as part of a automated pipeline, check out [pastForward](https://github.com/SarahSaadain/pastForward).
+
 ### Workflow
 
 ![REVEAL Pipeline](img/reveal_pipeline.svg)
@@ -456,9 +458,14 @@ This usually means no sequences with the `--scg-end` suffix were found, or their
 
 ---
 
+## Acknowledgements
+
+REVEAL is based on [teplotter](https://github.com/RobertKofler/teplotter).
+
+
 ## Authors
 
-Robert Kofler, Sarah Saadain
+[Robert Kofler](https://github.com/RobertKofler), [SarahSaadain](https://github.com/SarahSaadain)
 
 ## License
 
