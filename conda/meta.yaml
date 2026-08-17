@@ -1,5 +1,5 @@
 {% set name = "reveal-tools" %}
-{% set version = "1.0.2" %}
+{% set version = "1.0.1" %}
 {% set sha256 = "93c65603a2db0bc5ee2dd551468f385fb7fdcf44cc33534d3b37ff68d0338843" %}
 
 package:
