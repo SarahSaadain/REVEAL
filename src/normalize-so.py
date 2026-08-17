@@ -73,13 +73,10 @@ def main():
         parser.error(f"File not found: {args.seqentry}")
 
     writer = Writer(str(args.outfile) if args.outfile else None)
-    normfactor = NormFactor.getNormalizationFactor(str(args.seqentry), args.scgend, args.enddist, args.quantile)
-
-    if normfactor == 0:
-        log.error(
-            "Normalization factor is zero. This may indicate that no single copy genes were found "
-            "or that the coverage is zero or very low. Please check your input data."
-        )
+    try:
+        normfactor = NormFactor.getNormalizationFactor(str(args.seqentry), args.scgend, args.enddist, args.quantile)
+    except Exception as e:
+        log.error(str(e))
         sys.exit(1)
 
     for se in SeqEntryReader(str(args.seqentry)):

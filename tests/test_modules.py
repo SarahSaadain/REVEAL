@@ -1,6 +1,8 @@
+import gzip
 from io import StringIO
 
 import numpy as np
+import pytest
 
 from modules import (
     Indel,
@@ -10,6 +12,9 @@ from modules import (
     SeqEntry,
     SeqEntryReader,
     SNP,
+    Writer,
+    isssnp,
+    load_bed,
     load_fasta,
 )
 
@@ -26,6 +31,47 @@ def test_computeNormalization():
     ]
     nf = NormFactor.computeNormFactorForSe(ses, 0, 0)
     assert nf == 6, "test2"
+
+
+def test_computeNormalization_insufficient_coverage_reports_zero_percentage():
+    # at very low depth, a gene can have >=50% zero-coverage positions purely by
+    # chance (Poisson zero-inflation), which drives the median -- and thus the
+    # overall factor -- to 0. The error should call this out as insufficient
+    # coverage, with how much of the gene has zero depth, not a bare division-by-zero.
+    se = SeqEntry("t", [0, 0, 0, 0, 1, 1, 1], [], [], [])
+    assert np.median(se.cov) == 0
+
+    with pytest.raises(Exception) as excinfo:
+        NormFactor.computeNormFactorForSe([se], 0, 0)
+
+    msg = str(excinfo.value)
+    assert "insufficient coverage" in msg.lower()
+    assert "57.1%" in msg  # 4 of 7 positions have zero depth
+
+
+def test_computeNormalization_all_scgs_truly_uncovered_reports_100_percent():
+    # if every single-copy gene genuinely has zero reads everywhere, the error
+    # should reflect that plainly as 100% zero coverage.
+    ses = [SeqEntry("t", [0] * 10, [], [], []), SeqEntry("t", [0] * 5, [], [], [])]
+
+    with pytest.raises(Exception) as excinfo:
+        NormFactor.computeNormFactorForSe(ses, 0, 0)
+
+    msg = str(excinfo.value)
+    assert "insufficient coverage" in msg.lower()
+    assert "100.0%" in msg
+
+
+def test_computeNormalization_end_distance_trims_before_median():
+    # contig edges often carry distorted coverage (assembly/mapping artifacts), so
+    # end-distance trimming must be applied before computing the per-gene median.
+    se = SeqEntry("t", [0, 0, 1, 1, 1, 1, 0, 0], [], [], [])
+
+    nf_no_trim = NormFactor.computeNormFactorForSe([se], 0, 0)
+    assert nf_no_trim == 0.5  # untrimmed median of [0,0,1,1,1,1,0,0]
+
+    nf_trimmed = NormFactor.computeNormFactorForSe([se], 2, 0)
+    assert nf_trimmed == 1.0  # after trimming 2 positions off each end: [1,1,1,1]
 
 
 def test_covstat():
@@ -315,3 +361,186 @@ def test_filter_portable():
     assert len(ins) == 2
     assert ins[0][3] == "111"
     assert ins[1][3] == "113"
+
+
+def test_load_bed_half_open(tmp_path):
+    # BED is 0-based, half-open [start, end): "chr1 10 20" covers positions 10..19, not 20
+    bed = tmp_path / "mask.bed"
+    bed.write_text("chr1\t10\t20\n")
+
+    result = load_bed(str(bed))
+
+    assert 9 not in result["chr1"]
+    assert 10 in result["chr1"]
+    assert 19 in result["chr1"]
+    assert 20 not in result["chr1"]
+
+
+def test_load_bed_none_path_returns_empty():
+    result = load_bed(None)
+    assert result["anything"][0] is False
+
+
+def test_load_bed_skips_comments_and_headers(tmp_path):
+    bed = tmp_path / "mask.bed"
+    bed.write_text("# comment\ntrack name=x\nbrowser position chr1\nchr1\t0\t2\n")
+
+    result = load_bed(str(bed))
+
+    assert list(result["chr1"].keys()) == [0, 1]
+
+
+def test_getInsertion_at_position_zero():
+    # insertion right at the start of the contig: no reference base precedes it,
+    # so coverage lookup must not wrap around to the last base via covar[-1]
+    sb = SeqBuilder("AAATTTCCCGGG", "hans", 5)
+    sb.add_read(0, "3I3M", 5, "GGGAAA")
+    sb.add_read(0, "3I3M", 5, "GGGAAA")
+    se = sb.toSeqEntry(2, 0.1, 2, 0.1)
+
+    assert len(se.indellist) == 1
+    assert se.indellist[0].pos == 0
+    assert se.indellist[0].type == "ins"
+    assert se.indellist[0].count == 2
+
+
+def test_getDeletion_at_position_zero():
+    # deletion right at the start of the contig: coverage lookup must use covar[0]
+    # (real local depth from other reads), not wrap around to covar[-1] (the
+    # unrelated last base of the contig, which is 0 here and would otherwise
+    # cause this valid deletion to be silently dropped)
+    sb = SeqBuilder("AAATTTCCCGGG", "hans", 5)
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "2D3M", 5, "TTT")
+    sb.add_read(0, "2D3M", 5, "TTT")
+    se = sb.toSeqEntry(2, 0.1, 2, 0.1)
+
+    assert sb.covar[-1] == 0  # last base of contig is untouched by any read
+    assert len(se.indellist) == 1
+    assert se.indellist[0].pos == 0
+    assert se.indellist[0].type == "del"
+    assert se.indellist[0].count == 2
+
+
+def test_prepareIndelForPrint_deletion_at_position_zero():
+    # startpos==0 must read cov[0], not wrap around to the last element of cov
+    se = SeqEntry("tr1", [i for i in range(1000, 1400)], [], [], [])
+    se.indellist.append(Indel("t", "del", 0, 10, 20))
+
+    dele = PlotableFormater.prepareIndelForPrint(se, "tamtam", {})
+
+    assert len(dele) == 1
+    assert dele[0][5] == "1000.0"  # startcov must be cov[0], not cov[-1] (1399.0)
+
+
+def test_isssnp_zero_coverage_is_false():
+    assert isssnp("A", {"A": 0, "T": 0, "C": 0, "G": 0}, 0, 1, 0.1) is False
+
+
+def test_isssnp_true_when_count_and_freq_thresholds_met():
+    hash = {"A": 0, "T": 5, "C": 0, "G": 0}
+    assert isssnp("A", hash, 10, 2, 0.1) is True
+
+
+def test_isssnp_false_below_freq_threshold():
+    hash = {"A": 0, "T": 1, "C": 0, "G": 0}
+    assert isssnp("A", hash, 100, 1, 0.5) is False
+
+
+def test_isssnp_ref_base_never_counted():
+    # even with high count/freq, the reference base itself is never called a SNP
+    hash = {"A": 50, "T": 0, "C": 0, "G": 0}
+    assert isssnp("A", hash, 50, 1, 0.1) is False
+
+
+def test_writer_writes_to_file(tmp_path):
+    p = tmp_path / "out.txt"
+    w = Writer(str(p))
+    w.write("hello")
+    w.write("world")
+    w.__exit__(None, None, None)
+
+    assert p.read_text() == "hello\nworld\n"
+
+
+def test_writer_writes_to_stdout_when_no_outfile(capsys):
+    w = Writer(None)
+    w.write("hello")
+
+    assert capsys.readouterr().out == "hello\n"
+
+
+def test_writer_usable_as_context_manager(tmp_path):
+    p = tmp_path / "out.txt"
+    with Writer(str(p)) as w:
+        w.write("hello")
+
+    assert p.read_text() == "hello\n"
+    assert w.file_handle is None  # closed on exit
+
+
+def test_getNormalizationFactor_reads_scgs_from_file(tmp_path):
+    se1 = SeqEntry("contig1_scg", [10.0] * 10, [1.0] * 10, [], [])
+    se2 = SeqEntry("contig2_scg", [2.0] * 10, [1.0] * 10, [], [])
+    se3 = SeqEntry("contig3", [100.0] * 10, [1.0] * 10, [], [])  # not a SCG, must be ignored
+    content = "\n".join(str(se) for se in (se1, se2, se3)) + "\n"
+    p = tmp_path / "in.so"
+    p.write_text(content)
+
+    nf = NormFactor.getNormalizationFactor(str(p), "_scg", 0, 0)
+
+    assert nf == 6  # mean of medians 10 and 2
+
+
+def test_getNormalizationFactor_no_scg_suffix_match_raises(tmp_path):
+    se1 = SeqEntry("contig1", [10.0] * 5, [1.0] * 5, [], [])
+    p = tmp_path / "in.so"
+    p.write_text(str(se1) + "\n")
+
+    with pytest.raises(Exception):
+        NormFactor.getNormalizationFactor(str(p), "_scg", 0, 0)
+
+
+def test_seqentryreader_reads_gzip_file(tmp_path):
+    se_in = SeqEntry("chr1", [1.0, 2.0], [3.0, 4.0], [], [])
+    p = tmp_path / "in.so.gz"
+    with gzip.open(p, "wt") as f:
+        f.write(str(se_in) + "\n")
+
+    entries = list(SeqEntryReader(str(p)))
+
+    assert len(entries) == 1
+    assert entries[0].seqname == "chr1"
+    assert list(entries[0].cov) == [1.0, 2.0]
+
+
+def test_applyMask_masks_ymax_and_localmask_without_mutating_inputs():
+    cov = [5, 10, 3, 20]
+    ambcov = [1, 2, 3, 4]
+    localmask = {1: True}
+    cov_before, ambcov_before, localmask_before = list(cov), list(ambcov), dict(localmask)
+
+    new_cov, new_ambcov, mcov, mask = PlotableFormater.applyMask(cov, ambcov, localmask, ymax=15)
+
+    assert new_cov == [5, 0, 3, 0]
+    assert new_ambcov == [1, 0, 3, 0]
+    assert mcov == [0, 10, 0, 15]
+    assert mask == {1: True, 3: True}  # position 3 newly masked for exceeding ymax
+    # inputs must be untouched
+    assert cov == cov_before
+    assert ambcov == ambcov_before
+    assert localmask == localmask_before
+
+
+def test_prepareForPrint_does_not_mutate_se_or_tomask():
+    se = SeqEntry("chr1", [5.0, 25.0], [1.0, 2.0], [], [])
+    tomask = {"chr1": {}}
+
+    lines = PlotableFormater.prepareForPrint(se, "s1", tomask, ymax=15, bin_size=1)
+
+    assert se.cov == [5.0, 25.0]
+    assert se.ambcov == [1.0, 2.0]
+    assert tomask["chr1"] == {}
+    assert len(lines) > 0
