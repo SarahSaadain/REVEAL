@@ -92,7 +92,10 @@ class Writer:
             self.file_handle.write(towrite+"\n")
         else:
             print(towrite)
-    
+
+    def __enter__(self):
+        return self
+
     def __exit__(self, exc_type, exc_val, exc_tb):
             if self.should_close and self.file_handle is not None:
                 self.file_handle.close()
@@ -711,26 +714,37 @@ class PlotableFormater:
         return toret
 
     @classmethod
+    def applyMask(cls, cov, ambcov, localmask, ymax):
+        """
+        Zero out cov/ambcov at masked or ymax-exceeding positions; mcov holds what was removed.
+        Pure: returns new cov, ambcov, mcov, mask — never mutates its inputs.
+        """
+        n = len(cov)
+        cov = list(cov)
+        ambcov = list(ambcov)
+        mcov = [0] * n
+        mask = localmask.copy()
+
+        for i in range(n):
+            c = cov[i]
+            # mask coverage if either in localmaks or coverage exceeds ymax
+            if i in mask:
+                ambcov[i] = 0
+                mcov[i] = cov[i]
+                cov[i] = 0
+            elif ymax is not None and c > ymax:
+                ambcov[i] = 0
+                mcov[i] = ymax
+                cov[i] = 0
+                mask[i] = True
+
+        return cov, ambcov, mcov, mask
+
+    @classmethod
     def prepareForPrint(cls, se: SeqEntry, sampleid: str, tomask, ymax, bin_size: int = 1):
         # get local masking
         localmask=tomask[se.seqname] # bed is 0-based
-        # coverages and mask according to user specifications
-        cov=se.cov
-        ambcov=se.ambcov
-        mcov=[0]*len(cov)
-
-        for i in range(0,len(cov)):
-            c=cov[i]
-            # mask coverage if either in localmaks or coverage exceeds ymax
-            if (i in localmask):
-                ambcov[i]=0
-                mcov[i]=cov[i]
-                cov[i]=0
-            elif ymax is not None and c>ymax:
-                ambcov[i]=0
-                mcov[i]=ymax
-                cov[i]=0
-                localmask[i]=True
+        cov, ambcov, mcov, mask = cls.applyMask(se.cov, se.ambcov, localmask, ymax)
 
         lines=[]
         covt=PlotableFormater.prepareCoveragForPrint(se.seqname, cov, sampleid, "cov", bin_size)
@@ -740,9 +754,9 @@ class PlotableFormater:
         lines.extend(ambcovt)
         lines.extend(mcovt)
 
-        snps=PlotableFormater.prepareSNPForPrint(se,sampleid,localmask)
+        snps=PlotableFormater.prepareSNPForPrint(se,sampleid,mask)
         lines.extend(snps)
-        indels=PlotableFormater.prepareIndelForPrint(se,sampleid,localmask)
+        indels=PlotableFormater.prepareIndelForPrint(se,sampleid,mask)
         lines.extend(indels)
 
         return lines
