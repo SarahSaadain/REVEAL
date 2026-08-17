@@ -1,6 +1,7 @@
 from io import StringIO
 
 import numpy as np
+import pytest
 
 from modules import (
     Indel,
@@ -10,6 +11,7 @@ from modules import (
     SeqEntry,
     SeqEntryReader,
     SNP,
+    load_bed,
     load_fasta,
 )
 
@@ -26,6 +28,47 @@ def test_computeNormalization():
     ]
     nf = NormFactor.computeNormFactorForSe(ses, 0, 0)
     assert nf == 6, "test2"
+
+
+def test_computeNormalization_insufficient_coverage_reports_zero_percentage():
+    # at very low depth, a gene can have >=50% zero-coverage positions purely by
+    # chance (Poisson zero-inflation), which drives the median -- and thus the
+    # overall factor -- to 0. The error should call this out as insufficient
+    # coverage, with how much of the gene has zero depth, not a bare division-by-zero.
+    se = SeqEntry("t", [0, 0, 0, 0, 1, 1, 1], [], [], [])
+    assert np.median(se.cov) == 0
+
+    with pytest.raises(Exception) as excinfo:
+        NormFactor.computeNormFactorForSe([se], 0, 0)
+
+    msg = str(excinfo.value)
+    assert "insufficient coverage" in msg.lower()
+    assert "57.1%" in msg  # 4 of 7 positions have zero depth
+
+
+def test_computeNormalization_all_scgs_truly_uncovered_reports_100_percent():
+    # if every single-copy gene genuinely has zero reads everywhere, the error
+    # should reflect that plainly as 100% zero coverage.
+    ses = [SeqEntry("t", [0] * 10, [], [], []), SeqEntry("t", [0] * 5, [], [], [])]
+
+    with pytest.raises(Exception) as excinfo:
+        NormFactor.computeNormFactorForSe(ses, 0, 0)
+
+    msg = str(excinfo.value)
+    assert "insufficient coverage" in msg.lower()
+    assert "100.0%" in msg
+
+
+def test_computeNormalization_end_distance_trims_before_median():
+    # contig edges often carry distorted coverage (assembly/mapping artifacts), so
+    # end-distance trimming must be applied before computing the per-gene median.
+    se = SeqEntry("t", [0, 0, 1, 1, 1, 1, 0, 0], [], [], [])
+
+    nf_no_trim = NormFactor.computeNormFactorForSe([se], 0, 0)
+    assert nf_no_trim == 0.5  # untrimmed median of [0,0,1,1,1,1,0,0]
+
+    nf_trimmed = NormFactor.computeNormFactorForSe([se], 2, 0)
+    assert nf_trimmed == 1.0  # after trimming 2 positions off each end: [1,1,1,1]
 
 
 def test_covstat():
@@ -315,3 +358,75 @@ def test_filter_portable():
     assert len(ins) == 2
     assert ins[0][3] == "111"
     assert ins[1][3] == "113"
+
+
+def test_load_bed_half_open(tmp_path):
+    # BED is 0-based, half-open [start, end): "chr1 10 20" covers positions 10..19, not 20
+    bed = tmp_path / "mask.bed"
+    bed.write_text("chr1\t10\t20\n")
+
+    result = load_bed(str(bed))
+
+    assert 9 not in result["chr1"]
+    assert 10 in result["chr1"]
+    assert 19 in result["chr1"]
+    assert 20 not in result["chr1"]
+
+
+def test_load_bed_none_path_returns_empty():
+    result = load_bed(None)
+    assert result["anything"][0] is False
+
+
+def test_load_bed_skips_comments_and_headers(tmp_path):
+    bed = tmp_path / "mask.bed"
+    bed.write_text("# comment\ntrack name=x\nbrowser position chr1\nchr1\t0\t2\n")
+
+    result = load_bed(str(bed))
+
+    assert list(result["chr1"].keys()) == [0, 1]
+
+
+def test_getInsertion_at_position_zero():
+    # insertion right at the start of the contig: no reference base precedes it,
+    # so coverage lookup must not wrap around to the last base via covar[-1]
+    sb = SeqBuilder("AAATTTCCCGGG", "hans", 5)
+    sb.add_read(0, "3I3M", 5, "GGGAAA")
+    sb.add_read(0, "3I3M", 5, "GGGAAA")
+    se = sb.toSeqEntry(2, 0.1, 2, 0.1)
+
+    assert len(se.indellist) == 1
+    assert se.indellist[0].pos == 0
+    assert se.indellist[0].type == "ins"
+    assert se.indellist[0].count == 2
+
+
+def test_getDeletion_at_position_zero():
+    # deletion right at the start of the contig: coverage lookup must use covar[0]
+    # (real local depth from other reads), not wrap around to covar[-1] (the
+    # unrelated last base of the contig, which is 0 here and would otherwise
+    # cause this valid deletion to be silently dropped)
+    sb = SeqBuilder("AAATTTCCCGGG", "hans", 5)
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "1M", 5, "A")
+    sb.add_read(0, "2D3M", 5, "TTT")
+    sb.add_read(0, "2D3M", 5, "TTT")
+    se = sb.toSeqEntry(2, 0.1, 2, 0.1)
+
+    assert sb.covar[-1] == 0  # last base of contig is untouched by any read
+    assert len(se.indellist) == 1
+    assert se.indellist[0].pos == 0
+    assert se.indellist[0].type == "del"
+    assert se.indellist[0].count == 2
+
+
+def test_prepareIndelForPrint_deletion_at_position_zero():
+    # startpos==0 must read cov[0], not wrap around to the last element of cov
+    se = SeqEntry("tr1", [i for i in range(1000, 1400)], [], [], [])
+    se.indellist.append(Indel("t", "del", 0, 10, 20))
+
+    dele = PlotableFormater.prepareIndelForPrint(se, "tamtam", {})
+
+    assert len(dele) == 1
+    assert dele[0][5] == "1000.0"  # startcov must be cov[0], not cov[-1] (1399.0)

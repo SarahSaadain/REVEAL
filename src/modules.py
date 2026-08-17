@@ -35,8 +35,8 @@ def load_bed(bed_path: str):
             start = int(fields[1])
             end   = int(fields[2])
 
-            # BED is [start, end) → we include all positions from start inclusive to end inclusive
-            for pos in range(start, end+1):
+            # BED is [start, end) → half-open, so end is exclusive
+            for pos in range(start, end):
                 result[chrom][pos] = True
     return result
 
@@ -275,15 +275,35 @@ class NormFactor:
         assert quantile<50 and quantile>=0
         assert minDistance >=0
         per_scg_medians=[]
+        total_positions=0
+        zero_positions=0
         for se in seqEntries:
             if se.cov is None or len(se.cov) == 0:
                 continue
-            per_scg_medians.append(float(np.median(se.cov)))
+            cov=se.cov
+            if minDistance>0:
+                cov=cov[minDistance:-minDistance]
+            if len(cov)==0:
+                continue
+            total_positions+=len(cov)
+            zero_positions+=int(np.count_nonzero(np.asarray(cov)==0))
+            per_scg_medians.append(float(np.median(cov)))
 
         if len(per_scg_medians)==0:
             raise Exception("Unable to normalize; no valid coverage for a single copy gene")
+
         # mean of per-SCG medians: each gene contributes equally regardless of length
-        return sum(per_scg_medians)/len(per_scg_medians)
+        normfactor=sum(per_scg_medians)/len(per_scg_medians)
+
+        if normfactor==0:
+            zero_pct=100.0*zero_positions/total_positions
+            raise Exception(
+                f"Insufficient coverage to normalize: {zero_pct:.1f}% of single-copy-gene "
+                "positions have zero read depth, so no reliable normalization factor could "
+                "be computed. Please check your sequencing depth or input data."
+            )
+
+        return normfactor
 
 
 
@@ -564,7 +584,7 @@ class SeqBuilder:
             tmp[ins]+=1
         for ins,count in tmp.items():
             pos=ins[0] # -1 # position in ins is 0-based everything
-            cov=self.covar[pos-1]
+            cov=self.covar[max(pos-1,0)]  # pos==0: no base before insertion, use covar[0]
             if cov == 0:
                 continue
             insfreq=float(count)/float(cov)
@@ -578,7 +598,7 @@ class SeqBuilder:
             tmp[de]+=1
         for de,count in tmp.items():
             pos=de[0] # -1 # 0-based everything
-            cov=self.covar[pos-1]
+            cov=self.covar[max(pos-1,0)]  # pos==0: no base before deletion, use covar[0]
             if cov == 0:
                 continue        
             defreq=float(count)/float(cov)
@@ -678,7 +698,7 @@ class PlotableFormater:
                 endpos=startpos+i.length # eg 9 = 6+3
                 if startpos in tomask or endpos in tomask:
                     continue
-                startcov=float(se.cov[startpos-1]) # startcov at 5 = 6-1
+                startcov=float(se.cov[max(startpos-1,0)]) # startcov at 5 = 6-1; startpos==0: no base before deletion, use cov[0]
                 endcov=float(se.cov[endpos])   # endcov at 9
                 
                 # note startpos does not get PlottableFormat.offset on purpose! endpos needs offset
