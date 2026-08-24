@@ -25,7 +25,7 @@ REVEAL covcompare --stats Dmel1933_SL07.covstats.tsv Dmel1940_SL12.covstats.tsv 
 
 ---
 
-## `so2covstats.py` — per-sequence stats
+## `so2covstats.py`: per-sequence stats
 
 Streams through a `.so` file and computes one summary row per sequence.
 Memory usage is O(number of sequences), not O(number of positions).
@@ -41,9 +41,9 @@ Memory usage is O(number of sequences), not O(number of positions).
 | `seq_len` | Number of positions in the sequence |
 | `median_cov` | Median coverage across all positions. When data is SCG-normalised this is a copy-number proxy (1 = single-copy, 2 = duplicated, etc.) |
 | `mad_cov` | Median absolute deviation (MAD) of per-position coverage. Defined as `median(|cov_i − median_cov|)`. Measures how spread-out coverage is around the median while being resistant to outliers (e.g. a single deep-coverage spike does not inflate it the way standard deviation would). A low MAD relative to the median means coverage is flat and uniform; a high MAD means coverage is patchy or uneven. |
-| `cv_cov` | Coefficient of variation: `MAD / median_cov`. Scale-independent — a sequence with median 2 and MAD 0.4 has the same `cv_cov` (0.2) as one with median 50 and MAD 10, making it useful for comparing coverage evenness across sequences at very different copy numbers. Values close to 0 indicate flat, uniform coverage; values > 0.5 suggest substantial patchiness. Set to NaN when `median_cov = 0` (no coverage at all). |
+| `cv_cov` | Coefficient of variation: `MAD / median_cov`. Scale-independent: a sequence with median 2 and MAD 0.4 has the same `cv_cov` (0.2) as one with median 50 and MAD 10, making it useful for comparing coverage evenness across sequences at very different copy numbers. Values close to 0 indicate flat, uniform coverage; values > 0.5 suggest substantial patchiness. Set to NaN when `median_cov = 0` (no coverage at all). |
 | `max_cov` | Peak coverage; useful for spotting sharp spikes |
-| `frac_low` | Fraction of positions with coverage < 0.1 — proxy for absent or deleted regions |
+| `frac_low` | Fraction of positions with coverage < 0.1; proxy for absent or deleted regions |
 
 **Interpreting MAD and cv_cov together:**
 
@@ -51,7 +51,7 @@ Memory usage is O(number of sequences), not O(number of positions).
 |---|---|---|---|---|
 | Single-copy, even coverage | ~1 | small (< 0.2) | < 0.2 | Clean single-copy element |
 | Tandem repeat with uniform copies | ~N | small relative to median | < 0.2 | Stable repeat family at copy number N |
-| Partially deleted / heterozygous | ~0.5 | moderate | 0.3–0.8 | Element partially present or hemizygous |
+| Partially deleted / heterozygous | ~0.5 | moderate | 0.3-0.8 | Element partially present or hemizygous |
 | Mosaic or chimeric insertion | any | high | > 0.5 | Uneven coverage from assembly artefacts or structural variation |
 | Absent | ~0 | ~0 | NaN | Element not present in this sample |
 
@@ -81,7 +81,7 @@ REVEAL covstats --so FILE --sample-id ID [--outfile FILE]
 
 ---
 
-## `compare_covstats.py` — cross-sample comparison
+## `compare_covstats.py`: cross-sample comparison
 
 Loads two or more `.covstats.tsv` files, pivots to wide format (one row per
 sequence, one column block per sample), and flags sequences whose copy number shifts across samples.
@@ -102,7 +102,7 @@ A sequence is flagged when **any** condition below is met. Multiple flags are pi
 | `cn_min` | Lowest `median_cov` across samples |
 | `cn_max` | Highest `median_cov` across samples |
 | `cn_abs` | `cn_max − cn_min` |
-| `cn_log2fc` | `log2(cn_max / cn_min)` — NaN when `cn_min = 0` |
+| `cn_log2fc` | `log2(cn_max / cn_min)`; NaN when `cn_min = 0` |
 
 ### Per-sample columns (wide format)
 

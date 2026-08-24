@@ -27,7 +27,7 @@ REVEAL snpcompare \
 
 ---
 
-## `so2snpstats.py` — per-position SNP stats
+## `so2snpstats.py`: per-position SNP stats
 
 Streams through a `.so` file and emits one row per SNP position.
 
@@ -61,7 +61,7 @@ If no SNPs are found, an empty TSV with the correct headers is still written.
 
 ---
 
-## `compare_snpstats.py` — cross-sample SNP comparison
+## `compare_snpstats.py`: cross-sample SNP comparison
 
 Loads two or more `.snpstats.tsv` files and joins positions across samples.
 One row per `(seqid, pos)`.

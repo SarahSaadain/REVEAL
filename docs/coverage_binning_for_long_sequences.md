@@ -16,7 +16,7 @@ Coverage can be averaged into fixed-size windows (bins) before writing the `.plo
 REVEAL so2plotable --so sample.so --bin-size 100 --outfile sample.plotable
 ```
 
-The `--bin-size N` option averages coverage over windows of N positions. Each bin is written as a single row at the bin midpoint. SNPs, insertions, and deletions are not affected — they retain exact coordinates.
+The `--bin-size N` option averages coverage over windows of N positions. Each bin is written as a single row at the bin midpoint. SNPs, insertions, and deletions are not affected. They retain exact coordinates.
 
 ### During R plotting (for existing `.plotable` files)
 
@@ -31,9 +31,9 @@ The `--bin=N` flag bins coverage inside R after reading the file. This speeds up
 | Sequence length | Recommended `--bin-size` |
 |-----------------|--------------------------|
 | < 50 kbp        | 1 (no binning)           |
-| 50 kbp – 1 Mbp  | 10 – 50                  |
-| 1 – 10 Mbp      | 100                      |
-| > 10 Mbp        | 500 – 1000               |
+| 50 kbp - 1 Mbp  | 10 - 50                  |
+| 1 - 10 Mbp      | 100                      |
+| > 10 Mbp        | 500 - 1000               |
 
 ## What is binned vs. what is not
 

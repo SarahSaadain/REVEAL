@@ -1,5 +1,7 @@
 # REVEAL
 
+**R**ead-based **E**stimation and **V**isualization of **E**lement **A**bundance and **L**oci
+
 A Python toolkit for converting BAM/SAM alignment files to sequence overview (SO) format, with support for variant detection (SNPs, indels), coverage normalization, and visualization-ready outputs.
 
 ## Overview
@@ -107,13 +109,13 @@ REVEAL bam2so \
 **Parameters:**
 - `--infile`: Input BAM or SAM file (required)
 - `--fasta`: Reference FASTA file (required)
-- `--mapqth`: Mapping quality threshold (default: 5) — reads below this are counted as "ambiguous"
+- `--mapqth`: Mapping quality threshold (default: 5). Reads below this are counted as "ambiguous"
 - `--mc-snp`: Minimum SNP count (default: 5)
 - `--mf-snp`: Minimum SNP frequency (default: 0.1)
 - `--mc-indel`: Minimum indel count (default: 3)
 - `--mf-indel`: Minimum indel frequency (default: 0.01)
 - `--outfile`: Output SO file; if omitted, prints to stdout
-- `--log-level`: Logging verbosity — DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+- `--log-level`: Logging verbosity, one of DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 
 ---
 
@@ -201,14 +203,14 @@ Generates visualization-ready tab-delimited output with columns: `seqname`, `sam
 
 `REVEAL plot` automates running `visualize-plotable.R` on one or more folders of `.plotable` files.
 
-**Single folder — plot each file independently:**
+**Single folder (plot each file independently):**
 ```bash
 REVEAL plot \
   --folder Dmel01_plottable \
   --outdir results/
 ```
 
-**Multiple folders — merge same-named files across samples, then plot (enables facetting):**
+**Multiple folders (merge same-named files across samples, then plot; enables facetting):**
 ```bash
 REVEAL plot \
   --folders Dmel01_plottable Dmel02_plottable Dmel03_plottable \
@@ -278,7 +280,7 @@ TE_001   sample_1  snp      100       A  T  3
 Feature types:
 - `cov`: per-position coverage (unmasked)
 - `ambcov`: per-position coverage from low-MAPQ (ambiguously mapping) reads
-- `mcov`: per-position masked coverage — positions masked via `--mask-bed` or `--mask-ymax`; visualized separately to indicate regions excluded from variant calling
+- `mcov`: per-position masked coverage. Positions masked via `--mask-bed` or `--mask-ymax` are visualized separately, to indicate regions excluded from variant calling
 - `snp`: SNP calls (columns: seqname, sampleid, snp, pos, ref_base, alt_base, count)
 - `ins`: insertion calls (columns: seqname, sampleid, ins, pos, length, count)
 - `del`: deletion calls (columns: seqname, sampleid, del, start, end, start_cov, end_cov, count)
@@ -474,6 +476,5 @@ MIT License (MIT)
 ## Citation
 
 If you use REVEAL in your research, please cite:
-```
-TODO
-```
+
+> Saadain, S., Kapun, M., & Kofler, R. (2026). pastForward: a Snakemake pipeline for ancient and historical DNA with eukaryote-wide taxonomic screening and tracking of copy-number variation. *bioRxiv*. https://doi.org/10.64898/2026.08.07.743613
