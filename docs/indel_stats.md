@@ -25,7 +25,7 @@ REVEAL indelcompare \
 
 ---
 
-## `so2indelstats.py` — per-position indel stats
+## `so2indelstats.py`: per-position indel stats
 
 Streams through a `.so` file and emits one row per indel event.
 Both insertions (`ins`) and deletions (`del`) are included; use the `type`
@@ -64,14 +64,14 @@ If no indels are found, an empty TSV with the correct headers is still written.
 
 ---
 
-## `compare_indelstats.py` — cross-sample indel comparison
+## `compare_indelstats.py`: cross-sample indel comparison
 
 Loads two or more `.indelstats.tsv` files and joins events across samples.
 One row per `(seqid, pos, type, indel_length)`.
 
 ### Join key
 
-`(seqid, pos, type, indel_length)` — different-length events at the same
+`(seqid, pos, type, indel_length)`. Different-length events at the same
 position are biologically distinct and compared separately. A 3 bp deletion
 and a 5 bp deletion at the same position are two independent rows.
 
