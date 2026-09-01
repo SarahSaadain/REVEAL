@@ -63,6 +63,9 @@ def load_stats(files: list[Path]) -> pd.DataFrame:
             sys.exit(1)
         log.info("Loading %s", fp.name)
         df = pd.read_csv(fp, sep="\t")
+        if df.empty:
+            log.error("File has no data rows: %s", fp)
+            sys.exit(1)
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)
@@ -115,12 +118,15 @@ def pivot_to_wide(long_df: pd.DataFrame) -> pd.DataFrame:
     wide["cn_max"]    = wide[cn_cols].max(axis=1)
     wide["cn_abs"]    = (wide["cn_max"] - wide["cn_min"]).round(3)
 
-    # log2FC is undefined when cn_min is 0; set to NaN in that case
-    wide["cn_log2fc"] = np.where(
-        wide["cn_min"] > 0,
-        np.log2(wide["cn_max"] / wide["cn_min"]),
-        np.nan
-    ).round(3)
+    # log2FC is undefined when cn_min is 0; set to NaN in that case.
+    # Computed only on the cn_min > 0 subset so the division itself never
+    # sees a zero denominator (np.where evaluates both branches eagerly).
+    cn_min = wide["cn_min"].to_numpy(dtype=float)
+    cn_max = wide["cn_max"].to_numpy(dtype=float)
+    log2fc = np.full(len(wide), np.nan)
+    mask = cn_min > 0
+    log2fc[mask] = np.log2(cn_max[mask] / cn_min[mask])
+    wide["cn_log2fc"] = np.round(log2fc, 3)
 
     return wide, samples
 
