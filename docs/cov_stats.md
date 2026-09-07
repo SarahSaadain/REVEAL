@@ -40,10 +40,11 @@ Memory usage is O(number of sequences), not O(number of positions).
 | `sampleid` | Value of `--sample-id` |
 | `seq_len` | Number of positions in the sequence |
 | `median_cov` | Median coverage across all positions. When data is SCG-normalised this is a copy-number proxy (1 = single-copy, 2 = duplicated, etc.) |
+| `mean_cov` | Mean coverage across all positions. Unlike `median_cov` it is pulled up by coverage spikes, so `mean_cov` clearly above `median_cov` points to a few very deeply covered regions (e.g. a short sub-sequence attracting multi-mapping reads). Use `median_cov` as the copy-number proxy and `mean_cov` as a cross-check. |
 | `mad_cov` | Median absolute deviation (MAD) of per-position coverage. Defined as `median(|cov_i − median_cov|)`. Measures how spread-out coverage is around the median while being resistant to outliers (e.g. a single deep-coverage spike does not inflate it the way standard deviation would). A low MAD relative to the median means coverage is flat and uniform; a high MAD means coverage is patchy or uneven. |
 | `cv_cov` | Coefficient of variation: `MAD / median_cov`. Scale-independent: a sequence with median 2 and MAD 0.4 has the same `cv_cov` (0.2) as one with median 50 and MAD 10, making it useful for comparing coverage evenness across sequences at very different copy numbers. Values close to 0 indicate flat, uniform coverage; values > 0.5 suggest substantial patchiness. Set to NaN when `median_cov = 0` (no coverage at all). |
 | `max_cov` | Peak coverage; useful for spotting sharp spikes |
-| `frac_low` | Fraction of positions with coverage < 0.1; proxy for absent or deleted regions |
+| `breadth_cov` | Breadth of coverage: fraction of positions with coverage >= 0.1. `1` = every position covered, `0.4` = 40% of the sequence covered. Low values indicate an absent sequence or a large internal deletion. Complements `median_cov`: a sequence can have a high median while only part of it is present. |
 
 **Interpreting MAD and cv_cov together:**
 
@@ -94,6 +95,7 @@ A sequence is flagged when **any** condition below is met. Multiple flags are pi
 |---|---|---|
 | `CN_FC` | `cn_log2fc >= --cn-fc` | Relative shifts at low copy number (e.g. 1 → 5 = log2FC 2.32) |
 | `CN_ABS` | `cn_abs >= --cn-abs` | Large absolute shifts at high copy number (e.g. 50 → 70) |
+| `CN_GAINLOSS` | `cn_min = 0` and `cn_max >= --cn-gainloss` | Whole-sequence gain or loss (e.g. 0 → 2), which `CN_FC` cannot see because `cn_log2fc` is NaN when `cn_min = 0` |
 
 ### Cross-sample summary columns added
 
@@ -108,7 +110,7 @@ A sequence is flagged when **any** condition below is met. Multiple flags are pi
 
 For each sample `S` and each metric `M` from the list below, the output contains a column `M__S`:
 
-`median_cov`, `mad_cov`, `cv_cov`, `max_cov`, `frac_low`,
+`median_cov`, `mean_cov`, `mad_cov`, `cv_cov`, `max_cov`, `breadth_cov`,
 `n_snps`, `snp_density`, `median_alt`
 
 ### Usage
@@ -123,6 +125,7 @@ REVEAL covcompare --stats FILE [FILE ...] [options]
 | `--outfile` / `-o` | `comparison.tsv` | Output TSV path |
 | `--cn-fc` | `2.0` | log2 fold-change threshold for `CN_FC` flag |
 | `--cn-abs` | `10` | Absolute copy-number difference threshold for `CN_ABS` flag |
+| `--cn-gainloss` | `1` | Minimum `cn_max` for the `CN_GAINLOSS` flag when `cn_min = 0` |
 | `--flagged-only` | off | Only write sequences that have at least one flag |
 
 ### Output sort order
@@ -134,7 +137,7 @@ Flagged sequences first, then by `cn_abs` descending within each group.
 ## Notes
 
 - `median_cov` is the recommended copy-number proxy when the `.so` file was produced from SCG-normalised coverage. See `REVEAL normalize --help`.
-- `frac_low < 0.1` typically indicates a sequence present in the sample; `frac_low` close to 1.0 indicates absence or a large deletion.
+- `breadth_cov` close to 1.0 typically indicates a sequence present in the sample; `breadth_cov` close to 0 indicates absence or a large deletion.
 - `n_snps` / `snp_density` / `median_alt` here are **aggregate** summaries.
   To compare per-position SNP allele frequencies and detect allele flips between samples, use `REVEAL snpstats` + `REVEAL snpcompare`
   (see [snp_stats.md](snp_stats.md)).

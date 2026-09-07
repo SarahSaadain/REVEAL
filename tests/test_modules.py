@@ -544,3 +544,72 @@ def test_prepareForPrint_does_not_mutate_se_or_tomask():
     assert se.ambcov == [1.0, 2.0]
     assert tomask["chr1"] == {}
     assert len(lines) > 0
+
+
+def test_pivot_to_wide_zero_cn_min():
+    """cn_min == 0 must give NaN log2FC, not ZeroDivisionError (object dtype too)."""
+    import pandas as pd
+    from compare_covstats import pivot_to_wide
+
+    rows = []
+    for seqid, covs in [("s1", ["0.0", "3.0"]), ("s2", ["2.0", "4.0"])]:
+        for sample, cov in zip(("A", "B"), covs):
+            rows.append({
+                "seqid": seqid, "sampleid": sample, "seq_len": 100,
+                "median_cov": cov, "mad_cov": 1.0, "cv_cov": 0.3,
+                "max_cov": 5.0, "breadth_cov": 0.9, "n_snps": 1,
+                "snp_density": 1.0, "median_alt": 1.0,
+            })
+    long_df = pd.DataFrame(rows)
+    long_df["median_cov"] = long_df["median_cov"].astype(object)
+
+    wide, samples = pivot_to_wide(long_df)
+    assert samples == ["A", "B"]
+    by_seq = wide.set_index("seqid")
+    assert np.isnan(by_seq.loc["s1", "cn_log2fc"]), "cn_min==0 -> NaN"
+    assert by_seq.loc["s1", "cn_abs"] == 3.0
+    assert by_seq.loc["s2", "cn_log2fc"] == 1.0
+
+
+def test_covstats_breadth_and_missing_column():
+    """breadth_cov = fraction of positions covered; older files without it still pivot."""
+    import pandas as pd
+    from compare_covstats import pivot_to_wide
+
+    rows = [
+        {"seqid": "s1", "sampleid": s, "seq_len": 10, "median_cov": 2.0,
+         "mad_cov": 0.0, "cv_cov": 0.0, "max_cov": 2.0, "breadth_cov": b,
+         "n_snps": 1, "snp_density": 1.0, "median_alt": 1.0}
+        for s, b in (("A", 1.0), ("B", 0.5))
+    ]
+    long_df = pd.DataFrame(rows)
+
+    wide, _ = pivot_to_wide(long_df)
+    assert wide.loc[0, "breadth_cov__A"] == 1.0
+    assert wide.loc[0, "breadth_cov__B"] == 0.5
+
+    # a stats file written before breadth_cov existed must not raise
+    wide_old, _ = pivot_to_wide(long_df.drop(columns=["breadth_cov"]))
+    assert "breadth_cov__A" not in wide_old.columns
+    assert wide_old.loc[0, "median_cov__A"] == 2.0
+
+
+def test_add_flags_gainloss():
+    """Whole-sequence gain/loss: 0 -> n is invisible to CN_FC (NaN log2FC) and to CN_ABS below its threshold."""
+    import pandas as pd
+    from compare_covstats import add_flags
+
+    wide = pd.DataFrame({
+        "seqid":     ["absent", "present_both", "low_gain"],
+        "cn_min":    [0.0, 2.0, 0.0],
+        "cn_max":    [2.0, 4.0, 0.5],
+        "cn_abs":    [2.0, 2.0, 0.5],
+        "cn_log2fc": [np.nan, 1.0, np.nan],
+    })
+
+    flagged = add_flags(wide, cn_fc_threshold=2, cn_abs_threshold=10, cn_gainloss_threshold=1)
+    by_seq = flagged.set_index("seqid")
+
+    assert by_seq.loc["absent", "flag"] == "CN_GAINLOSS"
+    assert by_seq.loc["present_both", "flag"] == ""     # cn_min > 0, no gain/loss from zero
+    assert by_seq.loc["low_gain", "flag"] == ""         # cn_max below --cn-gainloss
