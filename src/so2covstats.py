@@ -16,10 +16,11 @@ Output columns
   Coverage
   seq_len      number of positions in the sequence
   median_cov   median coverage; copy-number proxy when SCG-normalised
+  mean_cov     mean coverage; sensitive to spikes, compare against median_cov
   mad_cov      median absolute deviation of coverage (robust spread)
   cv_cov       MAD / median; scale-independent variation (NaN if median=0)
   max_cov      peak coverage
-  frac_low     fraction of positions with coverage < 0.1 (absent/deleted proxy)
+  breadth_cov  fraction of positions with coverage >= 0.1 (1 = fully covered)
 
   SNPs
   n_snps       total alt-allele observations across all positions
@@ -55,10 +56,13 @@ def compute_stats(filepath: Path, sample_id: str) -> pd.DataFrame:
     seq_len     : number of positions in the sequence
     median_cov  : median coverage across all positions; used as copy number proxy
                   when data is SCG-normalised (1 = single copy, 2 = duplicated, etc.)
+    mean_cov    : mean coverage across all positions; pulled up by coverage spikes,
+                  so mean_cov >> median_cov signals a few very deep regions
     mad_cov     : median absolute deviation of coverage; robust spread measure
     cv_cov      : MAD / median; scale-independent coverage variation
     max_cov     : peak coverage (useful for spotting sharp spikes)
-    frac_low    : fraction of positions with coverage < 0.1 (proxy for absent/deleted)
+    breadth_cov : fraction of positions with coverage >= 0.1; 1 = fully covered,
+                  values well below 1 indicate absent or partially deleted sequence
 
     SNP metrics
     -----------
@@ -72,11 +76,12 @@ def compute_stats(filepath: Path, sample_id: str) -> pd.DataFrame:
         vals = np.asarray(se.cov, dtype=np.float32)
         seq_len = len(vals)
 
-        median_cov = float(np.median(vals))
-        mad_cov    = float(np.median(np.abs(vals - median_cov)))
-        cv_cov     = mad_cov / median_cov if median_cov > 0 else np.nan
-        max_cov    = float(np.max(vals))
-        frac_low   = float(np.mean(vals < 0.1))
+        median_cov  = float(np.median(vals))
+        mean_cov    = float(np.mean(vals))
+        mad_cov     = float(np.median(np.abs(vals - median_cov)))
+        cv_cov      = mad_cov / median_cov if median_cov > 0 else np.nan
+        max_cov     = float(np.max(vals))
+        breadth_cov = float(np.mean(vals >= 0.1))
 
         alt_counts = [
             count
@@ -93,10 +98,11 @@ def compute_stats(filepath: Path, sample_id: str) -> pd.DataFrame:
             "sampleid":    sample_id,
             "seq_len":     seq_len,
             "median_cov":  round(median_cov,  3),
+            "mean_cov":    round(mean_cov,    3),
             "mad_cov":     round(mad_cov,     3),
             "cv_cov":      round(cv_cov,      3),
             "max_cov":     round(max_cov,     3),
-            "frac_low":    round(frac_low,    3),
+            "breadth_cov": round(breadth_cov, 3),
             "n_snps":      n_snps,
             "snp_density": round(snp_density, 3),
             "median_alt":  round(median_alt,  3),

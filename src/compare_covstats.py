@@ -8,10 +8,13 @@ cross-sample metrics, and flags.
 
 Copy number flags (median_cov used as SCG-normalised copy number proxy)
 -----------------------------------------------------------------------
-CN_FC   log2(max/min) of median_cov across samples exceeds --cn-fc threshold.
-        Catches relative shifts at low copy number (e.g. 1 -> 5, log2FC = 2.32).
-CN_ABS  max - min of median_cov across samples exceeds --cn-abs threshold.
-        Catches large absolute shifts at high copy number (e.g. 50 -> 70).
+CN_FC        log2(max/min) of median_cov across samples exceeds --cn-fc threshold.
+             Catches relative shifts at low copy number (e.g. 1 -> 5, log2FC = 2.32).
+CN_ABS       max - min of median_cov across samples exceeds --cn-abs threshold.
+             Catches large absolute shifts at high copy number (e.g. 50 -> 70).
+CN_GAINLOSS  median_cov is 0 in at least one sample and >= --cn-gainloss in another.
+             Gain or loss of a whole sequence: CN_FC cannot see this because
+             log2FC is undefined when the minimum is 0.
 
 A sequence is flagged if ANY flag applies. Multiple flags are pipe-separated.
 
@@ -43,7 +46,7 @@ log = logging.getLogger(__name__)
 # Per-sample columns to carry into the wide output
 # These are written as {metric}__{sampleid} in the final table
 PER_SAMPLE_COLS = [
-    "median_cov", "mad_cov", "cv_cov", "max_cov", "frac_low",
+    "median_cov", "mean_cov", "mad_cov", "cv_cov", "max_cov", "breadth_cov",
     "n_snps", "snp_density", "median_alt",
 ]
 
@@ -63,6 +66,9 @@ def load_stats(files: list[Path]) -> pd.DataFrame:
             sys.exit(1)
         log.info("Loading %s", fp.name)
         df = pd.read_csv(fp, sep="\t")
+        if df.empty:
+            log.error("File has no data rows: %s", fp)
+            sys.exit(1)
         frames.append(df)
 
     combined = pd.concat(frames, ignore_index=True)
@@ -81,7 +87,7 @@ def load_stats(files: list[Path]) -> pd.DataFrame:
 
 # ── wide format ───────────────────────────────────────────────────────────────
 
-def pivot_to_wide(long_df: pd.DataFrame) -> pd.DataFrame:
+def pivot_to_wide(long_df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     """
     Pivot long-format stats (one row per seqid x sampleid) to wide format
     (one row per seqid).
@@ -95,12 +101,14 @@ def pivot_to_wide(long_df: pd.DataFrame) -> pd.DataFrame:
       cn_log2fc   : log2(cn_max / cn_min)  (relative shift; NaN if cn_min == 0)
     """
     if long_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
     samples = sorted(long_df["sampleid"].unique())
 
     # pivot all per-sample metrics at once
-    wide = long_df.pivot(index="seqid", columns="sampleid", values=PER_SAMPLE_COLS)
+    # tolerate stats files written by an older version that lack some columns
+    value_cols = [c for c in PER_SAMPLE_COLS if c in long_df.columns]
+    wide = long_df.pivot(index="seqid", columns="sampleid", values=value_cols)
     wide.columns = [f"{metric}__{sample}" for metric, sample in wide.columns]
     wide = wide.reset_index()
 
@@ -111,15 +119,18 @@ def pivot_to_wide(long_df: pd.DataFrame) -> pd.DataFrame:
     # --- cross-sample copy number metrics ---
     cn_cols = [f"median_cov__{s}" for s in samples if f"median_cov__{s}" in wide.columns]
 
-    wide["cn_min"]    = wide[cn_cols].min(axis=1)
-    wide["cn_max"]    = wide[cn_cols].max(axis=1)
+    # coerce: a non-numeric token in any input file makes the pivoted block
+    # object dtype, and object division by 0 raises instead of giving inf
+    cn = wide[cn_cols].apply(pd.to_numeric, errors="coerce")
+
+    wide["cn_min"]    = cn.min(axis=1)
+    wide["cn_max"]    = cn.max(axis=1)
     wide["cn_abs"]    = (wide["cn_max"] - wide["cn_min"]).round(3)
 
-    # log2FC is undefined when cn_min is 0; set to NaN in that case
-    wide["cn_log2fc"] = np.where(
-        wide["cn_min"] > 0,
-        np.log2(wide["cn_max"] / wide["cn_min"]),
-        np.nan
+    # log2FC is undefined when cn_min is 0; mask the denominator so those rows
+    # become NaN instead of dividing by zero
+    wide["cn_log2fc"] = np.log2(
+        wide["cn_max"] / wide["cn_min"].where(wide["cn_min"] > 0)
     ).round(3)
 
     return wide, samples
@@ -129,7 +140,8 @@ def pivot_to_wide(long_df: pd.DataFrame) -> pd.DataFrame:
 
 def add_flags(wide_df: pd.DataFrame,
               cn_fc_threshold: float,
-              cn_abs_threshold: float) -> pd.DataFrame:
+              cn_abs_threshold: float,
+              cn_gainloss_threshold: float) -> pd.DataFrame:
     """
     Add 'flag' (pipe-separated reasons) and 'flagged' (bool) columns.
 
@@ -140,12 +152,19 @@ def add_flags(wide_df: pd.DataFrame,
     CN_ABS  cn_abs >= cn_abs_threshold
             Catches large absolute shifts (sensitive at high copy number).
             Example: 50 -> 70 gives cn_abs 20; set threshold accordingly.
+
+    CN_GAINLOSS
+            cn_min == 0 and cn_max >= cn_gainloss_threshold
+            Gain or loss of a whole sequence. CN_FC is blind here (log2FC is
+            NaN when cn_min is 0) and CN_ABS misses it whenever cn_max is
+            below its threshold.
     """
     df = wide_df.copy()
 
     flags = pd.DataFrame(index=df.index)
-    flags["CN_FC"]  = df["cn_log2fc"].notna() & (df["cn_log2fc"] >= cn_fc_threshold)
-    flags["CN_ABS"] = df["cn_abs"]            >= cn_abs_threshold
+    flags["CN_FC"]       = df["cn_log2fc"].notna() & (df["cn_log2fc"] >= cn_fc_threshold)
+    flags["CN_ABS"]      = df["cn_abs"] >= cn_abs_threshold
+    flags["CN_GAINLOSS"] = (df["cn_min"] == 0) & (df["cn_max"] >= cn_gainloss_threshold)
 
     df["flag"]    = flags.apply(lambda row: "|".join(k for k, v in row.items() if v), axis=1)
     df["flagged"] = df["flag"].str.len() > 0
@@ -217,6 +236,14 @@ def main():
             "Example: --cn-abs 10  flags sequences where max-min median_cov >= 10."
         ),
     )
+    thresh.add_argument(
+        "--cn-gainloss", type=float, default=1, metavar="FLOAT",
+        help=(
+            "Gain/loss threshold for CN_GAINLOSS flag: median_cov is 0 in at "
+            "least one sample and >= this value in another. "
+            "Example: --cn-gainloss 2  flags 0 -> 2 but not 0 -> 1."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -228,7 +255,7 @@ def main():
     # --- load and process ---
     long_df = load_stats(args.stats)
     wide, samples = pivot_to_wide(long_df)
-    wide = add_flags(wide, args.cn_fc, args.cn_abs)
+    wide = add_flags(wide, args.cn_fc, args.cn_abs, args.cn_gainloss)
     wide = reorder_columns(wide, samples)
 
     # sort: flagged sequences first, then by cn_abs descending within each group
